@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Net Worth Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg: #12181a;
+    --surface: #1b2225;
+    --surface-2: #212a2d;
+    --border: #2c3639;
+    --text: #e7e9e5;
+    --text-dim: #8b9694;
+    --text-faint: #5b6567;
+    --emerald: #4fa98c;
+    --emerald-dim: #35695a;
+    --gold: #d9a63f;
+    --brick: #c1665a;
+    --radius: 10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', sans-serif;
+    min-height:100vh;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px);
+    background-size: 100% 44px;
+    background-position: 0 120px;
+  }
+  .wrap{max-width:1120px; margin:0 auto; padding:32px 24px 64px;}
+
+  header{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    padding-bottom:20px; margin-bottom:24px; border-bottom:1px solid var(--border);
+  }
+  header .title-block{display:flex; flex-direction:column; gap:4px;}
+  h1{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700; font-size:28px; margin:0; letter-spacing:-0.01em;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--emerald);
+  }
+  .io-buttons{display:flex; gap:8px;}
+  button, .btn{
+    font-family:'IBM Plex Sans', sans-serif; font-size:13px; font-weight:500;
+    background:var(--surface-2); color:var(--text); border:1px solid var(--border);
+    padding:9px 14px; border-radius:var(--radius); cursor:pointer;
+    transition: transform .12s ease, border-color .12s ease, background .12s ease;
+  }
+  button:hover, .btn:hover{border-color:var(--emerald-dim); transform:translateY(-1px);}
+  button:active{transform:translateY(0);}
+  button.primary{background:var(--emerald); border-color:var(--emerald); color:#0d1512; font-weight:600;}
+  button.primary:hover{background:#5ebc9c;}
+  button.danger-ghost{color:var(--text-dim);}
+  button.danger-ghost:hover{color:var(--brick); border-color:var(--brick);}
+
+  .grid{display:grid; grid-template-columns:280px 1fr; gap:0; align-items:start;}
+  .sidebar{
+    border-right:1px solid var(--border); padding-right:24px; margin-right:24px;
+    display:flex; flex-direction:column; gap:28px;
+    position:relative;
+  }
+  .ruler{
+    position:absolute; right:-1px; top:0; bottom:0; width:1px;
+  }
+  .ruler::before{
+    content:''; position:absolute; top:0; bottom:0; left:0; width:1px;
+    background: repeating-linear-gradient(to bottom, var(--emerald-dim) 0 2px, transparent 2px 44px);
+  }
+
+  .panel-title{
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:13px;
+    text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim);
+    margin:0 0 12px;
+  }
+  .field{display:flex; flex-direction:column; gap:6px; margin-bottom:10px;}
+  .field label{font-size:12px; color:var(--text-dim);}
+  input, select{
+    font-family:'IBM Plex Mono', monospace; font-size:13px;
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    padding:8px 10px; border-radius:8px; width:100%;
+  }
+  input:focus, select:focus{outline:2px solid var(--emerald-dim); outline-offset:1px;}
+  form{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px;
+  }
+  form button{width:100%; margin-top:4px;}
+
+  main{min-width:0;}
+  .hero{padding: 8px 0 28px;}
+  .hero-label{font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px;}
+  .hero-number{
+    font-family:'IBM Plex Mono', monospace; font-weight:600; font-size:56px; line-height:1;
+    color:var(--gold); font-variant-numeric: tabular-nums;
+  }
+  .hero-change{margin-top:10px; font-size:14px; color:var(--text-dim);}
+  .hero-change.up{color:var(--emerald);}
+  .hero-change.down{color:var(--brick);}
+
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:18px; margin-bottom:20px;
+  }
+  .card h2{
+    font-family:'Space Grotesk', sans-serif; font-size:14px; font-weight:600;
+    text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim); margin:0 0 14px;
+  }
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{
+    text-align:left; font-weight:500; color:var(--text-faint); font-size:11px;
+    text-transform:uppercase; letter-spacing:0.06em; padding-bottom:8px; border-bottom:1px solid var(--border);
+  }
+  td{padding:9px 0; border-bottom:1px solid var(--border); vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  td.num{font-family:'IBM Plex Mono', monospace; text-align:right; font-variant-numeric: tabular-nums;}
+  td.type-asset{color:var(--emerald);}
+  td.type-liability{color:var(--brick);}
+  .row-actions{display:flex; gap:6px; justify-content:flex-end;}
+  .row-actions button{padding:4px 8px; font-size:11px;}
+  .totals-row td{border-top:1px solid var(--border); border-bottom:none; font-weight:600; padding-top:10px;}
+
+  .empty{color:var(--text-faint); font-size:13px; padding:12px 0; font-style:italic;}
+  canvas{max-height:280px;}
+  .privacy-note{
+    margin-top:32px; padding-top:16px; border-top:1px solid var(--border);
+    font-size:12px; color:var(--text-faint); font-family:'IBM Plex Mono', monospace;
+  }
+  #import-file{display:none;}
+
+  @media (max-width: 780px){
+    .grid{grid-template-columns:1fr;}
+    .sidebar{border-right:none; padding-right:0; margin-right:0; border-bottom:1px solid var(--border); padding-bottom:24px; margin-bottom:24px;}
+    .ruler{display:none;}
+    .hero-number{font-size:40px;}
+    header{flex-direction:column; align-items:flex-start; gap:14px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="title-block">
+      <span class="eyebrow">Ledger · Local-only</span>
+      <h1>Net Worth Tracker</h1>
+    </div>
+    <div class="io-buttons">
+      <button id="export-btn" title="Download your data as JSON">Export JSON</button>
+      <button id="import-btn" title="Load a JSON file">Import JSON</button>
+      <input type="file" id="import-file" accept="application/json">
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="sidebar">
+      <div class="ruler"></div>
+
+      <div>
+        <p class="panel-title">Add account</p>
+        <form id="add-account-form">
+          <div class="field">
+            <label for="acc-name">Name</label>
+            <input id="acc-name" type="text" placeholder="e.g. Brokerage" required>
+          </div>
+          <div class="field">
+            <label for="acc-type">Type</label>
+            <select id="acc-type">
+              <option value="asset">Asset</option>
+              <option value="liability">Liability</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="acc-balance">Starting balance</label>
+            <input id="acc-balance" type="number" step="0.01" min="0" placeholder="0.00" required>
+          </div>
+          <button type="submit" class="primary">Add account</button>
+        </form>
+      </div>
+
+      <div>
+        <p class="panel-title">Update balance</p>
+        <form id="update-form">
+          <div class="field">
+            <label for="upd-account">Account</label>
+            <select id="upd-account"></select>
+          </div>
+          <div class="field">
+            <label for="upd-balance">New balance</label>
+            <input id="upd-balance" type="number" step="0.01" min="0" placeholder="0.00" required>
+          </div>
+          <button type="submit">Update</button>
+        </form>
+      </div>
+
+      <div>
+        <p class="panel-title">Snapshot</p>
+        <form id="snapshot-form">
+          <div class="field">
+            <label for="snap-date">Date</label>
+            <input id="snap-date" type="date" required>
+          </div>
+          <button type="submit" class="primary">Record snapshot</button>
+        </form>
+      </div>
+    </div>
+
+    <main>
+      <div class="hero">
+        <div class="hero-label">Current net worth</div>
+        <div class="hero-number" id="hero-number">$0.00</div>
+        <div class="hero-change" id="hero-change"></div>
+      </div>
+
+      <div class="card">
+        <h2>Net worth over time</h2>
+        <canvas id="history-chart" height="90"></canvas>
+        <div class="empty" id="chart-empty" style="display:none;">Record a snapshot to start charting your trend.</div>
+      </div>
+
+      <div class="card">
+        <h2>Accounts</h2>
+        <table id="accounts-table">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th style="text-align:right;">Balance</th><th></th></tr>
+          </thead>
+          <tbody id="accounts-body"></tbody>
+        </table>
+        <div class="empty" id="accounts-empty" style="display:none;">No accounts yet — add one on the left.</div>
+      </div>
+
+      <div class="card">
+        <h2>Snapshot history</h2>
+        <table id="history-table">
+          <thead><tr><th>Date</th><th style="text-align:right;">Net worth</th><th></th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+        <div class="empty" id="history-empty" style="display:none;">No snapshots recorded yet.</div>
+      </div>
+
+      <div class="privacy-note">
+        All data is stored only in this browser (localStorage). Nothing is sent anywhere. Use Export JSON to back up or move data to the CLI tool.
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const STORAGE_KEY = "netWorthTrackerData";
+
+  function loadData(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return {accounts:{}, history:[]};
+      const parsed = JSON.parse(raw);
+      return {accounts: parsed.accounts || {}, history: parsed.history || []};
+    }catch(e){
+      console.error("Failed to load stored data:", e);
+      return {accounts:{}, history:[]};
+    }
+  }
+
+  function saveData(data){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  let data = loadData();
+  let chart = null;
+
+  function fmtMoney(x){
+    const sign = x < 0 ? "-" : "";
+    return sign + "$" + Math.abs(x).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+
+  function computeNetWorth(balances, accounts){
+    let total = 0;
+    for(const name in balances){
+      const type = accounts[name] ? accounts[name].type : "asset";
+      total += type === "asset" ? balances[name] : -balances[name];
+    }
+    return total;
+  }
+
+  function currentNetWorth(){
+    const balances = {};
+    for(const name in data.accounts) balances[name] = data.accounts[name].balance;
+    return computeNetWorth(balances, data.accounts);
+  }
+
+  function animateNumber(el, from, to, duration){
+    const start = performance.now();
+    function step(now){
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const val = from + (to - from) * eased;
+      el.textContent = fmtMoney(val);
+      if(t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function render(){
+    renderAccountsTable();
+    renderUpdateSelect();
+    renderHistoryTable();
+    renderHero();
+    renderChart();
+  }
+
+  function renderHero(){
+    const el = document.getElementById("hero-number");
+    const prev = parseFloat(el.dataset.value || "0");
+    const nw = currentNetWorth();
+    animateNumber(el, prev, nw, 500);
+    el.dataset.value = nw;
+
+    const changeEl = document.getElementById("hero-change");
+    if(data.history.length){
+      const first = data.history[0];
+      const firstNw = computeNetWorth(first.balances, data.accounts);
+      const change = nw - firstNw;
+      const dir = change > 0 ? "up" : (change < 0 ? "down" : "");
+      const arrow = change > 0 ? "▲" : (change < 0 ? "▼" : "—");
+      changeEl.className = "hero-change " + dir;
+      changeEl.textContent = arrow + " " + fmtMoney(Math.abs(change)) + " since first snapshot (" + first.date + ")";
+    } else {
+      changeEl.textContent = "Record a snapshot to start tracking change over time.";
+      changeEl.className = "hero-change";
+    }
+  }
+
+  function renderAccountsTable(){
+    const body = document.getElementById("accounts-body");
+    const empty = document.getElementById("accounts-empty");
+    const names = Object.keys(data.accounts);
+    body.innerHTML = "";
+    empty.style.display = names.length ? "none" : "block";
+
+    let totalAssets = 0, totalLiabilities = 0;
+    names.forEach(name => {
+      const acc = data.accounts[name];
+      if(acc.type === "asset") totalAssets += acc.balance; else totalLiabilities += acc.balance;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(name)}</td>
+        <td class="type-${acc.type}">${acc.type}</td>
+        <td class="num">${fmtMoney(acc.balance)}</td>
+        <td><div class="row-actions"><button class="danger-ghost" data-remove="${escapeHtml(name)}">Remove</button></div></td>
+      `;
+      body.appendChild(tr);
+    });
+
+    if(names.length){
+      const tr = document.createElement("tr");
+      tr.className = "totals-row";
+      tr.innerHTML = `
+        <td colspan="2">Net worth</td>
+        <td class="num">${fmtMoney(totalAssets - totalLiabilities)}</td>
+        <td></td>
+      `;
+      body.appendChild(tr);
+    }
+
+    body.querySelectorAll("[data-remove]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const name = btn.getAttribute("data-remove");
+        delete data.accounts[name];
+        saveData(data);
+        render();
+      });
+    });
+  }
+
+  function renderUpdateSelect(){
+    const sel = document.getElementById("upd-account");
+    const prevVal = sel.value;
+    sel.innerHTML = "";
+    const names = Object.keys(data.accounts);
+    if(!names.length){
+      const opt = document.createElement("option");
+      opt.textContent = "Add an account first";
+      opt.disabled = true;
+      sel.appendChild(opt);
+      return;
+    }
+    names.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if(names.includes(prevVal)) sel.value = prevVal;
+  }
+
+  function renderHistoryTable(){
+    const body = document.getElementById("history-body");
+    const empty = document.getElementById("history-empty");
+    body.innerHTML = "";
+    empty.style.display = data.history.length ? "none" : "block";
+
+    data.history.forEach((h, idx) => {
+      const nw = computeNetWorth(h.balances, data.accounts);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(h.date)}</td>
+        <td class="num">${fmtMoney(nw)}</td>
+        <td><div class="row-actions"><button class="danger-ghost" data-remove-snap="${idx}">Remove</button></div></td>
+      `;
+      body.appendChild(tr);
+    });
+
+    body.querySelectorAll("[data-remove-snap]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const idx = parseInt(btn.getAttribute("data-remove-snap"), 10);
+        data.history.splice(idx, 1);
+        saveData(data);
+        render();
+      });
+    });
+  }
+
+  function renderChart(){
+    const canvas = document.getElementById("history-chart");
+    const emptyEl = document.getElementById("chart-empty");
+    if(!data.history.length){
+      canvas.style.display = "none";
+      emptyEl.style.display = "block";
+      if(chart){ chart.destroy(); chart = null; }
+      return;
+    }
+    canvas.style.display = "block";
+    emptyEl.style.display = "none";
+
+    const sorted = [...data.history].sort((a,b) => a.date.localeCompare(b.date));
+    const labels = sorted.map(h => h.date);
+    const values = sorted.map(h => computeNetWorth(h.balances, data.accounts));
+
+    const ctx = canvas.getContext("2d");
+    const rootStyles = getComputedStyle(document.documentElement);
+    const emerald = rootStyles.getPropertyValue("--emerald").trim();
+    const gold = rootStyles.getPropertyValue("--gold").trim();
+    const textDim = rootStyles.getPropertyValue("--text-dim").trim();
+    const border = rootStyles.getPropertyValue("--border").trim();
+
+    if(chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Net worth",
+          data: values,
+          borderColor: emerald,
+          backgroundColor: "rgba(79,169,140,0.12)",
+          pointBackgroundColor: gold,
+          pointBorderColor: gold,
+          pointRadius: 4,
+          borderWidth: 2,
+          fill: true,
+          tension: 0.25
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: textDim, font: {family: "IBM Plex Mono", size: 11} }, grid: { color: border } },
+          y: {
+            ticks: { color: textDim, font: {family: "IBM Plex Mono", size: 11}, callback: v => fmtMoney(v) },
+            grid: { color: border }
+          }
+        }
+      }
+    });
+  }
+
+  function escapeHtml(str){
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // --- Form handlers ---
+
+  document.getElementById("add-account-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const name = document.getElementById("acc-name").value.trim();
+    const type = document.getElementById("acc-type").value;
+    const balance = parseFloat(document.getElementById("acc-balance").value);
+    if(!name || isNaN(balance)) return;
+    if(data.accounts[name]){
+      alert(`Account "${name}" already exists.`);
+      return;
+    }
+    data.accounts[name] = {type, balance};
+    saveData(data);
+    e.target.reset();
+    render();
+  });
+
+  document.getElementById("update-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const name = document.getElementById("upd-account").value;
+    const balance = parseFloat(document.getElementById("upd-balance").value);
+    if(!name || isNaN(balance)) return;
+    data.accounts[name].balance = balance;
+    saveData(data);
+    document.getElementById("upd-balance").value = "";
+    render();
+  });
+
+  document.getElementById("snapshot-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const dateVal = document.getElementById("snap-date").value;
+    if(!dateVal) return;
+    const balances = {};
+    for(const name in data.accounts) balances[name] = data.accounts[name].balance;
+    data.history = data.history.filter(h => h.date !== dateVal);
+    data.history.push({date: dateVal, balances});
+    data.history.sort((a,b) => a.date.localeCompare(b.date));
+    saveData(data);
+    render();
+  });
+
+  document.getElementById("export-btn").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "net_worth_data.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById("import-btn").addEventListener("click", () => {
+    document.getElementById("import-file").click();
+  });
+
+  document.getElementById("import-file").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{
+        const parsed = JSON.parse(reader.result);
+        data = {accounts: parsed.accounts || {}, history: parsed.history || []};
+        saveData(data);
+        render();
+      }catch(err){
+        alert("That file doesn't look like valid net worth tracker JSON.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  // Default snapshot date to today
+  document.getElementById("snap-date").value = new Date().toISOString().slice(0,10);
+
+  render();
+})();
+</script>
+</body>
+</html>
