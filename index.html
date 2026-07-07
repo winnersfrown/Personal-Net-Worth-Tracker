@@ -163,6 +163,41 @@
 
   .empty{color:var(--text-faint); font-size:13px; padding:12px 0; font-style:italic;}
   canvas{max-height:280px;}
+
+  .goal-bar-track{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:999px;
+    height:14px; overflow:hidden; position:relative;
+  }
+  .goal-bar-fill{
+    height:100%; border-radius:999px;
+    background: linear-gradient(90deg, var(--emerald-dim), var(--emerald));
+    transition: width .5s cubic-bezier(.22,.9,.35,1);
+    width:0%;
+  }
+  .goal-meta{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-top:10px; font-family:'IBM Plex Mono', monospace; font-size:13px;
+  }
+  #goal-pct{font-weight:600; color:var(--gold);}
+  #goal-amounts{color:var(--text-dim);}
+  .goal-projection{margin-top:10px; font-size:13px; color:var(--text-dim);}
+  .goal-projection.reached{color:var(--emerald);}
+  .goal-header-row{display:flex; justify-content:space-between; align-items:center;}
+  .goal-header-row button{padding:4px 10px; font-size:11px;}
+
+  .category-badge{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-dim);
+    background:var(--surface-2); border:1px solid var(--border); border-radius:6px;
+    padding:1px 7px; display:inline-block;
+  }
+  .allocation-layout{display:flex; gap:24px; align-items:center; flex-wrap:wrap;}
+  .allocation-chart-wrap{width:180px; height:180px; flex-shrink:0;}
+  .allocation-legend{flex:1; min-width:200px; display:flex; flex-direction:column; gap:8px;}
+  .allocation-legend-row{display:flex; align-items:center; gap:8px; font-size:13px;}
+  .allocation-swatch{width:10px; height:10px; border-radius:3px; flex-shrink:0;}
+  .allocation-legend-row .name{flex:1; color:var(--text);}
+  .allocation-legend-row .amount{font-family:'IBM Plex Mono', monospace; color:var(--text-dim); font-variant-numeric: tabular-nums;}
+
   .privacy-note{
     margin-top:32px; padding-top:16px; border-top:1px solid var(--border);
     font-size:12px; color:var(--text-faint); font-family:'IBM Plex Mono', monospace;
@@ -218,6 +253,19 @@
             <label for="acc-balance">Starting balance</label>
             <input id="acc-balance" type="number" step="0.01" min="0" placeholder="0.00" required>
           </div>
+          <div class="field">
+            <label for="acc-category">Category</label>
+            <input id="acc-category" type="text" list="category-suggestions" placeholder="e.g. Cash">
+            <datalist id="category-suggestions">
+              <option value="Cash">
+              <option value="Investments">
+              <option value="Retirement">
+              <option value="Real Estate">
+              <option value="Vehicles">
+              <option value="Debt">
+              <option value="Other">
+            </datalist>
+          </div>
           <button type="submit" class="primary">Add account</button>
         </form>
       </div>
@@ -247,6 +295,17 @@
           <button type="submit" class="primary">Record snapshot</button>
         </form>
       </div>
+
+      <div>
+        <p class="panel-title">Goal</p>
+        <form id="goal-form">
+          <div class="field">
+            <label for="goal-amount">Target net worth</label>
+            <input id="goal-amount" type="number" step="0.01" min="0" placeholder="e.g. 100000">
+          </div>
+          <button type="submit">Set goal</button>
+        </form>
+      </div>
     </div>
 
     <main>
@@ -256,6 +315,21 @@
         <div class="hero-change" id="hero-change"></div>
       </div>
 
+      <div class="card" id="goal-card" style="display:none;">
+        <div class="goal-header-row">
+          <h2 style="margin:0;">Goal progress</h2>
+          <button class="danger-ghost" id="clear-goal-btn">Clear goal</button>
+        </div>
+        <div class="goal-bar-track" style="margin-top:14px;">
+          <div class="goal-bar-fill" id="goal-bar-fill"></div>
+        </div>
+        <div class="goal-meta">
+          <span id="goal-pct"></span>
+          <span id="goal-amounts"></span>
+        </div>
+        <div class="goal-projection" id="goal-projection"></div>
+      </div>
+
       <div class="card">
         <h2>Net worth over time</h2>
         <canvas id="history-chart" height="90"></canvas>
@@ -263,10 +337,21 @@
       </div>
 
       <div class="card">
+        <h2>Asset allocation</h2>
+        <div class="allocation-layout" id="allocation-layout">
+          <div class="allocation-chart-wrap">
+            <canvas id="allocation-chart"></canvas>
+          </div>
+          <div class="allocation-legend" id="allocation-legend"></div>
+        </div>
+        <div class="empty" id="allocation-empty" style="display:none;">Add an asset account to see its allocation breakdown.</div>
+      </div>
+
+      <div class="card">
         <h2>Accounts</h2>
         <table id="accounts-table">
           <thead>
-            <tr><th>Name</th><th>Type</th><th style="text-align:right;">Balance</th><th></th></tr>
+            <tr><th>Name</th><th>Type</th><th>Category</th><th style="text-align:right;">Balance</th><th></th></tr>
           </thead>
           <tbody id="accounts-body"></tbody>
         </table>
@@ -298,12 +383,12 @@
   function loadData(){
     try{
       const raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return {accounts:{}, history:[]};
+      if(!raw) return {accounts:{}, history:[], goal:null};
       const parsed = JSON.parse(raw);
-      return {accounts: parsed.accounts || {}, history: parsed.history || []};
+      return {accounts: parsed.accounts || {}, history: parsed.history || [], goal: (typeof parsed.goal === "number" ? parsed.goal : null)};
     }catch(e){
       console.error("Failed to load stored data:", e);
-      return {accounts:{}, history:[]};
+      return {accounts:{}, history:[], goal:null};
     }
   }
 
@@ -352,6 +437,8 @@
     renderHistoryTable();
     renderHero();
     renderChart();
+    renderAllocationChart();
+    renderGoal();
   }
 
   function renderHero(){
@@ -391,6 +478,7 @@
       tr.innerHTML = `
         <td>${escapeHtml(name)}</td>
         <td class="type-${acc.type}">${acc.type}</td>
+        <td><span class="category-badge">${escapeHtml(acc.category || "Other")}</span></td>
         <td class="num">${fmtMoney(acc.balance)}</td>
         <td><div class="row-actions"><button class="danger-ghost" data-remove="${escapeHtml(name)}">Remove</button></div></td>
       `;
@@ -401,7 +489,7 @@
       const tr = document.createElement("tr");
       tr.className = "totals-row";
       tr.innerHTML = `
-        <td colspan="2">Net worth</td>
+        <td colspan="3">Net worth</td>
         <td class="num">${fmtMoney(totalAssets - totalLiabilities)}</td>
         <td></td>
       `;
@@ -527,6 +615,160 @@
     return div.innerHTML;
   }
 
+  // --- Goal tracking ---
+
+  function estimateGoalProjection(){
+    const goal = data.goal;
+    if(goal === null || goal === undefined) return null;
+
+    const nw = currentNetWorth();
+    const result = {
+      goal, current: nw,
+      pct: goal > 0 ? Math.max(0, Math.min(1, nw / goal)) : null,
+      remaining: goal - nw,
+      projection: null
+    };
+
+    if(nw >= goal){
+      result.projection = "reached";
+      return result;
+    }
+
+    const history = [...data.history].sort((a,b) => a.date.localeCompare(b.date));
+    if(history.length < 2){
+      result.projection = "insufficient_history";
+      return result;
+    }
+
+    const points = history.map(h => ({
+      x: new Date(h.date + "T00:00:00").getTime(),
+      y: computeNetWorth(h.balances, data.accounts)
+    }));
+    const x0 = points[0].x;
+    const xs = points.map(p => (p.x - x0) / 86400000); // days since first snapshot
+    const ys = points.map(p => p.y);
+    const n = xs.length;
+    const meanX = xs.reduce((a,b) => a+b, 0) / n;
+    const meanY = ys.reduce((a,b) => a+b, 0) / n;
+    const denom = xs.reduce((sum, x) => sum + (x - meanX) ** 2, 0);
+    if(denom === 0){
+      result.projection = "insufficient_history";
+      return result;
+    }
+    let num = 0;
+    for(let i = 0; i < n; i++) num += (xs[i] - meanX) * (ys[i] - meanY);
+    const slope = num / denom; // $ per day
+
+    if(slope <= 0){
+      result.projection = "not_trending";
+      return result;
+    }
+
+    const daysNeeded = (goal - nw) / slope;
+    const projectedDate = new Date(Date.now() + daysNeeded * 86400000);
+    result.projection = "on_track";
+    result.projectedDate = projectedDate.toISOString().slice(0,10);
+    result.dollarsPerDay = slope;
+    return result;
+  }
+
+  function renderGoal(){
+    const card = document.getElementById("goal-card");
+    const info = estimateGoalProjection();
+    if(!info){
+      card.style.display = "none";
+      return;
+    }
+    card.style.display = "block";
+
+    const pct = (info.pct || 0) * 100;
+    document.getElementById("goal-bar-fill").style.width = Math.max(2, pct) + "%";
+    document.getElementById("goal-pct").textContent = pct.toFixed(1) + "%";
+    document.getElementById("goal-amounts").textContent = fmtMoney(info.current) + " of " + fmtMoney(info.goal);
+
+    const projEl = document.getElementById("goal-projection");
+    projEl.className = "goal-projection";
+    if(info.projection === "reached"){
+      projEl.textContent = "Goal reached! 🎉";
+      projEl.classList.add("reached");
+    } else if(info.projection === "insufficient_history"){
+      projEl.textContent = fmtMoney(info.remaining) + " remaining. Record at least 2 snapshots to get a projected date.";
+    } else if(info.projection === "not_trending"){
+      projEl.textContent = fmtMoney(info.remaining) + " remaining. Your recent trend is flat or declining, so a projection isn't available.";
+    } else if(info.projection === "on_track"){
+      projEl.textContent = fmtMoney(info.remaining) + " remaining. At your current trend (~" +
+        fmtMoney(info.dollarsPerDay) + "/day), projected to reach your goal around " + info.projectedDate + ".";
+    }
+  }
+
+  // --- Asset allocation ---
+
+  const ALLOCATION_COLORS = ["#4fa98c", "#d9a63f", "#7aa6c2", "#c1665a", "#9a7fb5", "#5b6567", "#b5c98f"];
+
+  let allocationChart = null;
+
+  function computeAllocation(){
+    const totals = {};
+    for(const name in data.accounts){
+      const acc = data.accounts[name];
+      if(acc.type !== "asset") continue;
+      const cat = acc.category || "Other";
+      totals[cat] = (totals[cat] || 0) + acc.balance;
+    }
+    return Object.entries(totals).sort((a,b) => b[1] - a[1]);
+  }
+
+  function renderAllocationChart(){
+    const wrap = document.getElementById("allocation-layout");
+    const emptyEl = document.getElementById("allocation-empty");
+    const legend = document.getElementById("allocation-legend");
+    const alloc = computeAllocation();
+
+    if(!alloc.length){
+      wrap.style.display = "none";
+      emptyEl.style.display = "block";
+      if(allocationChart){ allocationChart.destroy(); allocationChart = null; }
+      return;
+    }
+    wrap.style.display = "flex";
+    emptyEl.style.display = "none";
+
+    const total = alloc.reduce((s, [,v]) => s+v, 0);
+    const labels = alloc.map(([cat]) => cat);
+    const values = alloc.map(([,v]) => v);
+    const colors = labels.map((_, i) => ALLOCATION_COLORS[i % ALLOCATION_COLORS.length]);
+
+    const canvas = document.getElementById("allocation-chart");
+    const ctx = canvas.getContext("2d");
+    const rootStyles = getComputedStyle(document.documentElement);
+    const surface = rootStyles.getPropertyValue("--surface").trim();
+
+    if(allocationChart) allocationChart.destroy();
+    allocationChart = new Chart(ctx, {
+      type: "doughnut",
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: surface, borderWidth: 2 }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.label}: ${fmtMoney(ctx.parsed)}` } } },
+        cutout: "62%"
+      }
+    });
+
+    legend.innerHTML = "";
+    alloc.forEach(([cat, amount], i) => {
+      const pct = total ? (amount/total*100) : 0;
+      const row = document.createElement("div");
+      row.className = "allocation-legend-row";
+      row.innerHTML = `
+        <span class="allocation-swatch" style="background:${colors[i]}"></span>
+        <span class="name">${escapeHtml(cat)}</span>
+        <span class="amount">${fmtMoney(amount)} · ${pct.toFixed(1)}%</span>
+      `;
+      legend.appendChild(row);
+    });
+  }
+
   // --- Form handlers ---
 
   document.getElementById("add-account-form").addEventListener("submit", e => {
@@ -534,12 +776,13 @@
     const name = document.getElementById("acc-name").value.trim();
     const type = document.getElementById("acc-type").value;
     const balance = parseFloat(document.getElementById("acc-balance").value);
+    const category = document.getElementById("acc-category").value.trim() || "Other";
     if(!name || isNaN(balance)) return;
     if(data.accounts[name]){
       alert(`Account "${name}" already exists.`);
       return;
     }
-    data.accounts[name] = {type, balance};
+    data.accounts[name] = {type, balance, category};
     saveData(data);
     e.target.reset();
     render();
@@ -569,6 +812,22 @@
     render();
   });
 
+  document.getElementById("goal-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const amount = parseFloat(document.getElementById("goal-amount").value);
+    if(isNaN(amount) || amount <= 0) return;
+    data.goal = amount;
+    saveData(data);
+    e.target.reset();
+    render();
+  });
+
+  document.getElementById("clear-goal-btn").addEventListener("click", () => {
+    data.goal = null;
+    saveData(data);
+    render();
+  });
+
   document.getElementById("export-btn").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
     const url = URL.createObjectURL(blob);
@@ -590,7 +849,7 @@
     reader.onload = () => {
       try{
         const parsed = JSON.parse(reader.result);
-        data = {accounts: parsed.accounts || {}, history: parsed.history || []};
+        data = {accounts: parsed.accounts || {}, history: parsed.history || [], goal: (typeof parsed.goal === "number" ? parsed.goal : null)};
         saveData(data);
         render();
       }catch(err){
@@ -625,6 +884,7 @@
     localStorage.setItem("netWorthTrackerTheme", theme);
     paintThemeIcon(theme);
     renderChart(); // rebuild so Chart.js picks up new CSS variable colors
+    renderAllocationChart();
   }
 
   document.getElementById("theme-toggle").addEventListener("click", () => {
