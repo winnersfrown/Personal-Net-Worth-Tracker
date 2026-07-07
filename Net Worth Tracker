@@ -1,273 +1,900 @@
-#!/usr/bin/env python3
-"""
-Net Worth Tracker
-------------------
-A dependency-free CLI tool for tracking personal net worth over time.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Net Worth Tracker</title>
+<script>
+  // Applied before CSS paints to avoid a flash of the wrong theme.
+  (function(){
+    var saved = localStorage.getItem("netWorthTrackerTheme");
+    var theme = saved || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg: #12181a;
+    --surface: #1b2225;
+    --surface-2: #212a2d;
+    --border: #2c3639;
+    --text: #e7e9e5;
+    --text-dim: #8b9694;
+    --text-faint: #5b6567;
+    --emerald: #4fa98c;
+    --emerald-dim: #35695a;
+    --gold: #d9a63f;
+    --brick: #c1665a;
+    --radius: 10px;
+  }
+  :root[data-theme="light"]{
+    --bg: #f1efea;
+    --surface: #ffffff;
+    --surface-2: #f6f4ef;
+    --border: #ddd7c9;
+    --text: #1c2422;
+    --text-dim: #6b7371;
+    --text-faint: #9aa19e;
+    --emerald: #2f8567;
+    --emerald-dim: #bfe0d3;
+    --gold: #a6720f;
+    --brick: #a84e42;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', sans-serif;
+    min-height:100vh;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px);
+    background-size: 100% 44px;
+    background-position: 0 120px;
+    transition: background-color .2s ease, color .2s ease;
+  }
+  body, .card, form, input, select, button, table, td, th{
+    transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+  }
+  .wrap{max-width:1120px; margin:0 auto; padding:32px 24px 64px;}
 
-Data model
-==========
-All data lives in a single JSON file (default: net_worth_data.json):
+  header{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    padding-bottom:20px; margin-bottom:24px; border-bottom:1px solid var(--border);
+  }
+  header .title-block{display:flex; flex-direction:column; gap:4px;}
+  h1{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700; font-size:28px; margin:0; letter-spacing:-0.01em;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--emerald);
+  }
+  .io-buttons{display:flex; gap:8px;}
+  button, .btn{
+    font-family:'IBM Plex Sans', sans-serif; font-size:13px; font-weight:500;
+    background:var(--surface-2); color:var(--text); border:1px solid var(--border);
+    padding:9px 14px; border-radius:var(--radius); cursor:pointer;
+    transition: transform .12s ease, border-color .12s ease, background .12s ease;
+  }
+  button:hover, .btn:hover{border-color:var(--emerald-dim); transform:translateY(-1px);}
+  button:active{transform:translateY(0);}
+  button.primary{background:var(--emerald); border-color:var(--emerald); color:#0d1512; font-weight:600;}
+  button.primary:hover{background:#5ebc9c;}
+  button.danger-ghost{color:var(--text-dim);}
+  button.danger-ghost:hover{color:var(--brick); border-color:var(--brick);}
 
-{
-  "accounts": {
-    "Checking":    {"type": "asset",     "balance": 5000.0},
-    "Credit Card": {"type": "liability", "balance": 1200.0}
-  },
-  "history": [
-    {"date": "2026-07-05", "balances": {"Checking": 5000.0, "Credit Card": 1200.0}}
-  ]
-}
+  #theme-toggle{
+    width:34px; height:34px; padding:0; display:flex; align-items:center; justify-content:center;
+    border-radius:8px; flex-shrink:0;
+  }
+  #theme-toggle svg{width:16px; height:16px; stroke:var(--text-dim); fill:none; stroke-width:1.8;}
+  #theme-toggle:hover svg{stroke:var(--emerald);}
 
-- "asset" balances add to net worth.
-- "liability" balances are stored as positive numbers but subtracted from net worth.
-- "history" is a list of snapshots taken over time so you can chart progress.
+  .grid{display:grid; grid-template-columns:280px 1fr; gap:0; align-items:start;}
+  .sidebar{
+    border-right:1px solid var(--border); padding-right:24px; margin-right:24px;
+    display:flex; flex-direction:column; gap:28px;
+    position:relative;
+  }
+  .ruler{
+    position:absolute; right:-1px; top:0; bottom:0; width:1px;
+  }
+  .ruler::before{
+    content:''; position:absolute; top:0; bottom:0; left:0; width:1px;
+    background: repeating-linear-gradient(to bottom, var(--emerald-dim) 0 2px, transparent 2px 44px);
+  }
 
-Usage
-=====
-  python net_worth_tracker.py add-account "Checking" asset 5000
-  python net_worth_tracker.py add-account "Credit Card" liability 1200
-  python net_worth_tracker.py update "Checking" 5250
-  python net_worth_tracker.py snapshot
-  python net_worth_tracker.py report
-  python net_worth_tracker.py history
-  python net_worth_tracker.py chart
-  python net_worth_tracker.py remove-account "Old 401k"
+  .panel-title{
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:13px;
+    text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim);
+    margin:0 0 12px;
+  }
+  .field{display:flex; flex-direction:column; gap:6px; margin-bottom:10px;}
+  .field label{font-size:12px; color:var(--text-dim);}
+  input, select{
+    font-family:'IBM Plex Mono', monospace; font-size:13px;
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    padding:8px 10px; border-radius:8px; width:100%;
+  }
+  input:focus, select:focus{outline:2px solid var(--emerald-dim); outline-offset:1px;}
+  form{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px;
+  }
+  form button{width:100%; margin-top:4px;}
 
-Run `python net_worth_tracker.py -h` for full help.
-"""
+  main{min-width:0;}
+  .hero{padding: 8px 0 28px;}
+  .hero-label{font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px;}
+  .hero-number{
+    font-family:'IBM Plex Mono', monospace; font-weight:600; font-size:56px; line-height:1;
+    color:var(--gold); font-variant-numeric: tabular-nums;
+  }
+  .hero-change{margin-top:10px; font-size:14px; color:var(--text-dim);}
+  .hero-change.up{color:var(--emerald);}
+  .hero-change.down{color:var(--brick);}
 
-import argparse
-import json
-import os
-import sys
-from datetime import date, datetime
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:18px; margin-bottom:20px;
+  }
+  .card h2{
+    font-family:'Space Grotesk', sans-serif; font-size:14px; font-weight:600;
+    text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim); margin:0 0 14px;
+  }
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{
+    text-align:left; font-weight:500; color:var(--text-faint); font-size:11px;
+    text-transform:uppercase; letter-spacing:0.06em; padding-bottom:8px; border-bottom:1px solid var(--border);
+  }
+  td{padding:9px 0; border-bottom:1px solid var(--border); vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  td.num{font-family:'IBM Plex Mono', monospace; text-align:right; font-variant-numeric: tabular-nums;}
+  td.type-asset{color:var(--emerald);}
+  td.type-liability{color:var(--brick);}
+  .row-actions{display:flex; gap:6px; justify-content:flex-end;}
+  .row-actions button{padding:4px 8px; font-size:11px;}
+  .totals-row td{border-top:1px solid var(--border); border-bottom:none; font-weight:600; padding-top:10px;}
 
-DEFAULT_DATA_FILE = "net_worth_data.json"
+  .empty{color:var(--text-faint); font-size:13px; padding:12px 0; font-style:italic;}
+  canvas{max-height:280px;}
 
+  .goal-bar-track{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:999px;
+    height:14px; overflow:hidden; position:relative;
+  }
+  .goal-bar-fill{
+    height:100%; border-radius:999px;
+    background: linear-gradient(90deg, var(--emerald-dim), var(--emerald));
+    transition: width .5s cubic-bezier(.22,.9,.35,1);
+    width:0%;
+  }
+  .goal-meta{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-top:10px; font-family:'IBM Plex Mono', monospace; font-size:13px;
+  }
+  #goal-pct{font-weight:600; color:var(--gold);}
+  #goal-amounts{color:var(--text-dim);}
+  .goal-projection{margin-top:10px; font-size:13px; color:var(--text-dim);}
+  .goal-projection.reached{color:var(--emerald);}
+  .goal-header-row{display:flex; justify-content:space-between; align-items:center;}
+  .goal-header-row button{padding:4px 10px; font-size:11px;}
 
-# --------------------------------------------------------------------------
-# Data helpers
-# --------------------------------------------------------------------------
+  .category-badge{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-dim);
+    background:var(--surface-2); border:1px solid var(--border); border-radius:6px;
+    padding:1px 7px; display:inline-block;
+  }
+  .allocation-layout{display:flex; gap:24px; align-items:center; flex-wrap:wrap;}
+  .allocation-chart-wrap{width:180px; height:180px; flex-shrink:0;}
+  .allocation-legend{flex:1; min-width:200px; display:flex; flex-direction:column; gap:8px;}
+  .allocation-legend-row{display:flex; align-items:center; gap:8px; font-size:13px;}
+  .allocation-swatch{width:10px; height:10px; border-radius:3px; flex-shrink:0;}
+  .allocation-legend-row .name{flex:1; color:var(--text);}
+  .allocation-legend-row .amount{font-family:'IBM Plex Mono', monospace; color:var(--text-dim); font-variant-numeric: tabular-nums;}
 
-def load_data(path):
-    if not os.path.exists(path):
-        return {"accounts": {}, "history": []}
-    with open(path, "r") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            print(f"Error: '{path}' is not valid JSON. Aborting.", file=sys.stderr)
-            sys.exit(1)
+  .privacy-note{
+    margin-top:32px; padding-top:16px; border-top:1px solid var(--border);
+    font-size:12px; color:var(--text-faint); font-family:'IBM Plex Mono', monospace;
+  }
+  #import-file{display:none;}
 
+  @media (max-width: 780px){
+    .grid{grid-template-columns:1fr;}
+    .sidebar{border-right:none; padding-right:0; margin-right:0; border-bottom:1px solid var(--border); padding-bottom:24px; margin-bottom:24px;}
+    .ruler{display:none;}
+    .hero-number{font-size:40px;}
+    header{flex-direction:column; align-items:flex-start; gap:14px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
 
-def save_data(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2, sort_keys=False)
+  <header>
+    <div class="title-block">
+      <span class="eyebrow">Ledger · Local-only</span>
+      <h1>Net Worth Tracker</h1>
+    </div>
+    <div class="io-buttons">
+      <button id="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+        <svg id="theme-icon" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"></svg>
+      </button>
+      <button id="export-btn" title="Download your data as JSON">Export JSON</button>
+      <button id="import-btn" title="Load a JSON file">Import JSON</button>
+      <input type="file" id="import-file" accept="application/json">
+    </div>
+  </header>
 
+  <div class="grid">
+    <div class="sidebar">
+      <div class="ruler"></div>
 
-def compute_net_worth(balances, accounts):
-    """balances: dict of account -> raw stored balance (liabilities positive)."""
-    total = 0.0
-    for name, bal in balances.items():
-        acc_type = accounts.get(name, {}).get("type", "asset")
-        total += bal if acc_type == "asset" else -bal
-    return total
+      <div>
+        <p class="panel-title">Add account</p>
+        <form id="add-account-form">
+          <div class="field">
+            <label for="acc-name">Name</label>
+            <input id="acc-name" type="text" placeholder="e.g. Brokerage" required>
+          </div>
+          <div class="field">
+            <label for="acc-type">Type</label>
+            <select id="acc-type">
+              <option value="asset">Asset</option>
+              <option value="liability">Liability</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="acc-balance">Starting balance</label>
+            <input id="acc-balance" type="number" step="0.01" min="0" placeholder="0.00" required>
+          </div>
+          <div class="field">
+            <label for="acc-category">Category</label>
+            <input id="acc-category" type="text" list="category-suggestions" placeholder="e.g. Cash">
+            <datalist id="category-suggestions">
+              <option value="Cash">
+              <option value="Investments">
+              <option value="Retirement">
+              <option value="Real Estate">
+              <option value="Vehicles">
+              <option value="Debt">
+              <option value="Other">
+            </datalist>
+          </div>
+          <button type="submit" class="primary">Add account</button>
+        </form>
+      </div>
 
+      <div>
+        <p class="panel-title">Update balance</p>
+        <form id="update-form">
+          <div class="field">
+            <label for="upd-account">Account</label>
+            <select id="upd-account"></select>
+          </div>
+          <div class="field">
+            <label for="upd-balance">New balance</label>
+            <input id="upd-balance" type="number" step="0.01" min="0" placeholder="0.00" required>
+          </div>
+          <button type="submit">Update</button>
+        </form>
+      </div>
 
-def fmt_money(x):
-    sign = "-" if x < 0 else ""
-    return f"{sign}${abs(x):,.2f}"
+      <div>
+        <p class="panel-title">Snapshot</p>
+        <form id="snapshot-form">
+          <div class="field">
+            <label for="snap-date">Date</label>
+            <input id="snap-date" type="date" required>
+          </div>
+          <button type="submit" class="primary">Record snapshot</button>
+        </form>
+      </div>
 
+      <div>
+        <p class="panel-title">Goal</p>
+        <form id="goal-form">
+          <div class="field">
+            <label for="goal-amount">Target net worth</label>
+            <input id="goal-amount" type="number" step="0.01" min="0" placeholder="e.g. 100000">
+          </div>
+          <button type="submit">Set goal</button>
+        </form>
+      </div>
+    </div>
 
-# --------------------------------------------------------------------------
-# Commands
-# --------------------------------------------------------------------------
+    <main>
+      <div class="hero">
+        <div class="hero-label">Current net worth</div>
+        <div class="hero-number" id="hero-number">$0.00</div>
+        <div class="hero-change" id="hero-change"></div>
+      </div>
 
-def cmd_add_account(args, data, path):
-    name = args.name
-    if name in data["accounts"]:
-        print(f"Account '{name}' already exists. Use 'update' to change its balance "
-              f"or 'remove-account' to delete it first.")
-        sys.exit(1)
-    if args.type not in ("asset", "liability"):
-        print("Account type must be 'asset' or 'liability'.")
-        sys.exit(1)
-    data["accounts"][name] = {"type": args.type, "balance": args.balance}
-    save_data(path, data)
-    print(f"Added {args.type} account '{name}' with balance {fmt_money(args.balance)}.")
+      <div class="card" id="goal-card" style="display:none;">
+        <div class="goal-header-row">
+          <h2 style="margin:0;">Goal progress</h2>
+          <button class="danger-ghost" id="clear-goal-btn">Clear goal</button>
+        </div>
+        <div class="goal-bar-track" style="margin-top:14px;">
+          <div class="goal-bar-fill" id="goal-bar-fill"></div>
+        </div>
+        <div class="goal-meta">
+          <span id="goal-pct"></span>
+          <span id="goal-amounts"></span>
+        </div>
+        <div class="goal-projection" id="goal-projection"></div>
+      </div>
 
+      <div class="card">
+        <h2>Net worth over time</h2>
+        <canvas id="history-chart" height="90"></canvas>
+        <div class="empty" id="chart-empty" style="display:none;">Record a snapshot to start charting your trend.</div>
+      </div>
 
-def cmd_remove_account(args, data, path):
-    if args.name not in data["accounts"]:
-        print(f"No such account: '{args.name}'")
-        sys.exit(1)
-    del data["accounts"][args.name]
-    save_data(path, data)
-    print(f"Removed account '{args.name}'. (Past history entries are kept as-is.)")
+      <div class="card">
+        <h2>Asset allocation</h2>
+        <div class="allocation-layout" id="allocation-layout">
+          <div class="allocation-chart-wrap">
+            <canvas id="allocation-chart"></canvas>
+          </div>
+          <div class="allocation-legend" id="allocation-legend"></div>
+        </div>
+        <div class="empty" id="allocation-empty" style="display:none;">Add an asset account to see its allocation breakdown.</div>
+      </div>
 
+      <div class="card">
+        <h2>Accounts</h2>
+        <table id="accounts-table">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th>Category</th><th style="text-align:right;">Balance</th><th></th></tr>
+          </thead>
+          <tbody id="accounts-body"></tbody>
+        </table>
+        <div class="empty" id="accounts-empty" style="display:none;">No accounts yet — add one on the left.</div>
+      </div>
 
-def cmd_update(args, data, path):
-    if args.name not in data["accounts"]:
-        print(f"No such account: '{args.name}'. Add it first with 'add-account'.")
-        sys.exit(1)
-    data["accounts"][args.name]["balance"] = args.balance
-    save_data(path, data)
-    print(f"Updated '{args.name}' to {fmt_money(args.balance)}.")
+      <div class="card">
+        <h2>Snapshot history</h2>
+        <table id="history-table">
+          <thead><tr><th>Date</th><th style="text-align:right;">Net worth</th><th></th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+        <div class="empty" id="history-empty" style="display:none;">No snapshots recorded yet.</div>
+      </div>
 
+      <div class="privacy-note">
+        All data is stored only in this browser (localStorage). Nothing is sent anywhere. Use Export JSON to back up or move data to the CLI tool.
+      </div>
+    </main>
+  </div>
+</div>
 
-def cmd_list(args, data, path):
-    if not data["accounts"]:
-        print("No accounts yet. Add one with 'add-account'.")
-        return
-    print(f"{'Account':<25}{'Type':<12}{'Balance':>15}")
-    print("-" * 52)
-    for name, info in data["accounts"].items():
-        print(f"{name:<25}{info['type']:<12}{fmt_money(info['balance']):>15}")
+<script>
+(function(){
+  "use strict";
 
+  const STORAGE_KEY = "netWorthTrackerData";
 
-def cmd_snapshot(args, data, path):
-    if not data["accounts"]:
-        print("No accounts to snapshot. Add one with 'add-account' first.")
-        sys.exit(1)
-    snap_date = args.date or date.today().isoformat()
-    balances = {name: info["balance"] for name, info in data["accounts"].items()}
+  function loadData(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return {accounts:{}, history:[], goal:null};
+      const parsed = JSON.parse(raw);
+      return {accounts: parsed.accounts || {}, history: parsed.history || [], goal: (typeof parsed.goal === "number" ? parsed.goal : null)};
+    }catch(e){
+      console.error("Failed to load stored data:", e);
+      return {accounts:{}, history:[], goal:null};
+    }
+  }
 
-    # Replace an existing snapshot for the same date, if present.
-    data["history"] = [h for h in data["history"] if h["date"] != snap_date]
-    data["history"].append({"date": snap_date, "balances": balances})
-    data["history"].sort(key=lambda h: h["date"])
+  function saveData(data){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
 
-    save_data(path, data)
-    net_worth = compute_net_worth(balances, data["accounts"])
-    print(f"Snapshot recorded for {snap_date}. Net worth: {fmt_money(net_worth)}")
+  let data = loadData();
+  let chart = null;
 
+  function fmtMoney(x){
+    const sign = x < 0 ? "-" : "";
+    return sign + "$" + Math.abs(x).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
 
-def cmd_report(args, data, path):
-    if not data["accounts"]:
-        print("No accounts yet. Add one with 'add-account'.")
-        return
+  function computeNetWorth(balances, accounts){
+    let total = 0;
+    for(const name in balances){
+      const type = accounts[name] ? accounts[name].type : "asset";
+      total += type === "asset" ? balances[name] : -balances[name];
+    }
+    return total;
+  }
 
-    assets = {n: i["balance"] for n, i in data["accounts"].items() if i["type"] == "asset"}
-    liabilities = {n: i["balance"] for n, i in data["accounts"].items() if i["type"] == "liability"}
+  function currentNetWorth(){
+    const balances = {};
+    for(const name in data.accounts) balances[name] = data.accounts[name].balance;
+    return computeNetWorth(balances, data.accounts);
+  }
 
-    total_assets = sum(assets.values())
-    total_liabilities = sum(liabilities.values())
-    net_worth = total_assets - total_liabilities
+  function animateNumber(el, from, to, duration){
+    const start = performance.now();
+    function step(now){
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const val = from + (to - from) * eased;
+      el.textContent = fmtMoney(val);
+      if(t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
 
-    print("ASSETS")
-    for n, b in assets.items():
-        print(f"  {n:<25}{fmt_money(b):>15}")
-    print(f"  {'Total assets':<25}{fmt_money(total_assets):>15}")
+  function render(){
+    renderAccountsTable();
+    renderUpdateSelect();
+    renderHistoryTable();
+    renderHero();
+    renderChart();
+    renderAllocationChart();
+    renderGoal();
+  }
 
-    print("\nLIABILITIES")
-    for n, b in liabilities.items():
-        print(f"  {n:<25}{fmt_money(b):>15}")
-    print(f"  {'Total liabilities':<25}{fmt_money(total_liabilities):>15}")
+  function renderHero(){
+    const el = document.getElementById("hero-number");
+    const prev = parseFloat(el.dataset.value || "0");
+    const nw = currentNetWorth();
+    animateNumber(el, prev, nw, 500);
+    el.dataset.value = nw;
 
-    print("\n" + "=" * 40)
-    print(f"  {'NET WORTH':<25}{fmt_money(net_worth):>15}")
-    print("=" * 40)
+    const changeEl = document.getElementById("hero-change");
+    if(data.history.length){
+      const first = data.history[0];
+      const firstNw = computeNetWorth(first.balances, data.accounts);
+      const change = nw - firstNw;
+      const dir = change > 0 ? "up" : (change < 0 ? "down" : "");
+      const arrow = change > 0 ? "▲" : (change < 0 ? "▼" : "—");
+      changeEl.className = "hero-change " + dir;
+      changeEl.textContent = arrow + " " + fmtMoney(Math.abs(change)) + " since first snapshot (" + first.date + ")";
+    } else {
+      changeEl.textContent = "Record a snapshot to start tracking change over time.";
+      changeEl.className = "hero-change";
+    }
+  }
 
-    if data["history"]:
-        first = data["history"][0]
-        first_net = compute_net_worth(first["balances"], data["accounts"])
-        change = net_worth - first_net
-        print(f"\nChange since first snapshot ({first['date']}): {fmt_money(change)}")
+  function renderAccountsTable(){
+    const body = document.getElementById("accounts-body");
+    const empty = document.getElementById("accounts-empty");
+    const names = Object.keys(data.accounts);
+    body.innerHTML = "";
+    empty.style.display = names.length ? "none" : "block";
 
+    let totalAssets = 0, totalLiabilities = 0;
+    names.forEach(name => {
+      const acc = data.accounts[name];
+      if(acc.type === "asset") totalAssets += acc.balance; else totalLiabilities += acc.balance;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(name)}</td>
+        <td class="type-${acc.type}">${acc.type}</td>
+        <td><span class="category-badge">${escapeHtml(acc.category || "Other")}</span></td>
+        <td class="num">${fmtMoney(acc.balance)}</td>
+        <td><div class="row-actions"><button class="danger-ghost" data-remove="${escapeHtml(name)}">Remove</button></div></td>
+      `;
+      body.appendChild(tr);
+    });
 
-def cmd_history(args, data, path):
-    if not data["history"]:
-        print("No snapshots yet. Use 'snapshot' to record one.")
-        return
-    print(f"{'Date':<14}{'Net Worth':>15}")
-    print("-" * 29)
-    for h in data["history"]:
-        net_worth = compute_net_worth(h["balances"], data["accounts"])
-        print(f"{h['date']:<14}{fmt_money(net_worth):>15}")
+    if(names.length){
+      const tr = document.createElement("tr");
+      tr.className = "totals-row";
+      tr.innerHTML = `
+        <td colspan="3">Net worth</td>
+        <td class="num">${fmtMoney(totalAssets - totalLiabilities)}</td>
+        <td></td>
+      `;
+      body.appendChild(tr);
+    }
 
+    body.querySelectorAll("[data-remove]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const name = btn.getAttribute("data-remove");
+        delete data.accounts[name];
+        saveData(data);
+        render();
+      });
+    });
+  }
 
-def cmd_chart(args, data, path):
-    if not data["history"]:
-        print("No snapshots yet. Use 'snapshot' to record one before charting.")
-        return
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("matplotlib is not installed. Install it with:\n  pip install matplotlib")
-        sys.exit(1)
+  function renderUpdateSelect(){
+    const sel = document.getElementById("upd-account");
+    const prevVal = sel.value;
+    sel.innerHTML = "";
+    const names = Object.keys(data.accounts);
+    if(!names.length){
+      const opt = document.createElement("option");
+      opt.textContent = "Add an account first";
+      opt.disabled = true;
+      sel.appendChild(opt);
+      return;
+    }
+    names.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if(names.includes(prevVal)) sel.value = prevVal;
+  }
 
-    dates = [h["date"] for h in data["history"]]
-    values = [compute_net_worth(h["balances"], data["accounts"]) for h in data["history"]]
-    parsed_dates = [datetime.strptime(d, "%Y-%m-%d") for d in dates]
+  function renderHistoryTable(){
+    const body = document.getElementById("history-body");
+    const empty = document.getElementById("history-empty");
+    body.innerHTML = "";
+    empty.style.display = data.history.length ? "none" : "block";
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(parsed_dates, values, marker="o", linewidth=2)
-    plt.title("Net Worth Over Time")
-    plt.xlabel("Date")
-    plt.ylabel("Net Worth ($)")
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
+    data.history.forEach((h, idx) => {
+      const nw = computeNetWorth(h.balances, data.accounts);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(h.date)}</td>
+        <td class="num">${fmtMoney(nw)}</td>
+        <td><div class="row-actions"><button class="danger-ghost" data-remove-snap="${idx}">Remove</button></div></td>
+      `;
+      body.appendChild(tr);
+    });
 
-    out_path = args.output or "net_worth_chart.png"
-    plt.savefig(out_path, dpi=150)
-    print(f"Chart saved to '{out_path}'.")
+    body.querySelectorAll("[data-remove-snap]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const idx = parseInt(btn.getAttribute("data-remove-snap"), 10);
+        data.history.splice(idx, 1);
+        saveData(data);
+        render();
+      });
+    });
+  }
 
+  function renderChart(){
+    const canvas = document.getElementById("history-chart");
+    const emptyEl = document.getElementById("chart-empty");
+    if(!data.history.length){
+      canvas.style.display = "none";
+      emptyEl.style.display = "block";
+      if(chart){ chart.destroy(); chart = null; }
+      return;
+    }
+    canvas.style.display = "block";
+    emptyEl.style.display = "none";
 
-# --------------------------------------------------------------------------
-# Argument parsing
-# --------------------------------------------------------------------------
+    const sorted = [...data.history].sort((a,b) => a.date.localeCompare(b.date));
+    const labels = sorted.map(h => h.date);
+    const values = sorted.map(h => computeNetWorth(h.balances, data.accounts));
 
-def build_parser():
-    parser = argparse.ArgumentParser(
-        description="Track your personal net worth over time from the command line.",
-    )
-    parser.add_argument(
-        "--file", default=DEFAULT_DATA_FILE,
-        help=f"Path to the JSON data file (default: {DEFAULT_DATA_FILE})"
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
+    const ctx = canvas.getContext("2d");
+    const rootStyles = getComputedStyle(document.documentElement);
+    const emerald = rootStyles.getPropertyValue("--emerald").trim();
+    const gold = rootStyles.getPropertyValue("--gold").trim();
+    const textDim = rootStyles.getPropertyValue("--text-dim").trim();
+    const border = rootStyles.getPropertyValue("--border").trim();
 
-    p = sub.add_parser("add-account", help="Add a new asset or liability account")
-    p.add_argument("name", help="Account name, e.g. 'Checking'")
-    p.add_argument("type", choices=["asset", "liability"], help="Account type")
-    p.add_argument("balance", type=float, help="Starting balance (always positive)")
-    p.set_defaults(func=cmd_add_account)
+    if(chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Net worth",
+          data: values,
+          borderColor: emerald,
+          backgroundColor: "rgba(79,169,140,0.12)",
+          pointBackgroundColor: gold,
+          pointBorderColor: gold,
+          pointRadius: 4,
+          borderWidth: 2,
+          fill: true,
+          tension: 0.25
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: textDim, font: {family: "IBM Plex Mono", size: 11} }, grid: { color: border } },
+          y: {
+            ticks: { color: textDim, font: {family: "IBM Plex Mono", size: 11}, callback: v => fmtMoney(v) },
+            grid: { color: border }
+          }
+        }
+      }
+    });
+  }
 
-    p = sub.add_parser("remove-account", help="Remove an account")
-    p.add_argument("name", help="Account name to remove")
-    p.set_defaults(func=cmd_remove_account)
+  function escapeHtml(str){
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
 
-    p = sub.add_parser("update", help="Update an account's current balance")
-    p.add_argument("name", help="Account name")
-    p.add_argument("balance", type=float, help="New balance (always positive)")
-    p.set_defaults(func=cmd_update)
+  // --- Goal tracking ---
 
-    p = sub.add_parser("list", help="List all accounts and current balances")
-    p.set_defaults(func=cmd_list)
+  function estimateGoalProjection(){
+    const goal = data.goal;
+    if(goal === null || goal === undefined) return null;
 
-    p = sub.add_parser("snapshot", help="Record a dated net worth snapshot from current balances")
-    p.add_argument("--date", help="Date for the snapshot, YYYY-MM-DD (default: today)")
-    p.set_defaults(func=cmd_snapshot)
+    const nw = currentNetWorth();
+    const result = {
+      goal, current: nw,
+      pct: goal > 0 ? Math.max(0, Math.min(1, nw / goal)) : null,
+      remaining: goal - nw,
+      projection: null
+    };
 
-    p = sub.add_parser("report", help="Show current net worth broken down by account")
-    p.set_defaults(func=cmd_report)
+    if(nw >= goal){
+      result.projection = "reached";
+      return result;
+    }
 
-    p = sub.add_parser("history", help="Show net worth for every recorded snapshot")
-    p.set_defaults(func=cmd_history)
+    const history = [...data.history].sort((a,b) => a.date.localeCompare(b.date));
+    if(history.length < 2){
+      result.projection = "insufficient_history";
+      return result;
+    }
 
-    p = sub.add_parser("chart", help="Save a PNG chart of net worth over time (requires matplotlib)")
-    p.add_argument("--output", help="Output PNG path (default: net_worth_chart.png)")
-    p.set_defaults(func=cmd_chart)
+    const points = history.map(h => ({
+      x: new Date(h.date + "T00:00:00").getTime(),
+      y: computeNetWorth(h.balances, data.accounts)
+    }));
+    const x0 = points[0].x;
+    const xs = points.map(p => (p.x - x0) / 86400000); // days since first snapshot
+    const ys = points.map(p => p.y);
+    const n = xs.length;
+    const meanX = xs.reduce((a,b) => a+b, 0) / n;
+    const meanY = ys.reduce((a,b) => a+b, 0) / n;
+    const denom = xs.reduce((sum, x) => sum + (x - meanX) ** 2, 0);
+    if(denom === 0){
+      result.projection = "insufficient_history";
+      return result;
+    }
+    let num = 0;
+    for(let i = 0; i < n; i++) num += (xs[i] - meanX) * (ys[i] - meanY);
+    const slope = num / denom; // $ per day
 
-    return parser
+    if(slope <= 0){
+      result.projection = "not_trending";
+      return result;
+    }
 
+    const daysNeeded = (goal - nw) / slope;
+    const projectedDate = new Date(Date.now() + daysNeeded * 86400000);
+    result.projection = "on_track";
+    result.projectedDate = projectedDate.toISOString().slice(0,10);
+    result.dollarsPerDay = slope;
+    return result;
+  }
 
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    data = load_data(args.file)
-    args.func(args, data, args.file)
+  function renderGoal(){
+    const card = document.getElementById("goal-card");
+    const info = estimateGoalProjection();
+    if(!info){
+      card.style.display = "none";
+      return;
+    }
+    card.style.display = "block";
 
+    const pct = (info.pct || 0) * 100;
+    document.getElementById("goal-bar-fill").style.width = Math.max(2, pct) + "%";
+    document.getElementById("goal-pct").textContent = pct.toFixed(1) + "%";
+    document.getElementById("goal-amounts").textContent = fmtMoney(info.current) + " of " + fmtMoney(info.goal);
 
-if __name__ == "__main__":
-    main()
+    const projEl = document.getElementById("goal-projection");
+    projEl.className = "goal-projection";
+    if(info.projection === "reached"){
+      projEl.textContent = "Goal reached! 🎉";
+      projEl.classList.add("reached");
+    } else if(info.projection === "insufficient_history"){
+      projEl.textContent = fmtMoney(info.remaining) + " remaining. Record at least 2 snapshots to get a projected date.";
+    } else if(info.projection === "not_trending"){
+      projEl.textContent = fmtMoney(info.remaining) + " remaining. Your recent trend is flat or declining, so a projection isn't available.";
+    } else if(info.projection === "on_track"){
+      projEl.textContent = fmtMoney(info.remaining) + " remaining. At your current trend (~" +
+        fmtMoney(info.dollarsPerDay) + "/day), projected to reach your goal around " + info.projectedDate + ".";
+    }
+  }
+
+  // --- Asset allocation ---
+
+  const ALLOCATION_COLORS = ["#4fa98c", "#d9a63f", "#7aa6c2", "#c1665a", "#9a7fb5", "#5b6567", "#b5c98f"];
+
+  let allocationChart = null;
+
+  function computeAllocation(){
+    const totals = {};
+    for(const name in data.accounts){
+      const acc = data.accounts[name];
+      if(acc.type !== "asset") continue;
+      const cat = acc.category || "Other";
+      totals[cat] = (totals[cat] || 0) + acc.balance;
+    }
+    return Object.entries(totals).sort((a,b) => b[1] - a[1]);
+  }
+
+  function renderAllocationChart(){
+    const wrap = document.getElementById("allocation-layout");
+    const emptyEl = document.getElementById("allocation-empty");
+    const legend = document.getElementById("allocation-legend");
+    const alloc = computeAllocation();
+
+    if(!alloc.length){
+      wrap.style.display = "none";
+      emptyEl.style.display = "block";
+      if(allocationChart){ allocationChart.destroy(); allocationChart = null; }
+      return;
+    }
+    wrap.style.display = "flex";
+    emptyEl.style.display = "none";
+
+    const total = alloc.reduce((s, [,v]) => s+v, 0);
+    const labels = alloc.map(([cat]) => cat);
+    const values = alloc.map(([,v]) => v);
+    const colors = labels.map((_, i) => ALLOCATION_COLORS[i % ALLOCATION_COLORS.length]);
+
+    const canvas = document.getElementById("allocation-chart");
+    const ctx = canvas.getContext("2d");
+    const rootStyles = getComputedStyle(document.documentElement);
+    const surface = rootStyles.getPropertyValue("--surface").trim();
+
+    if(allocationChart) allocationChart.destroy();
+    allocationChart = new Chart(ctx, {
+      type: "doughnut",
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: surface, borderWidth: 2 }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.label}: ${fmtMoney(ctx.parsed)}` } } },
+        cutout: "62%"
+      }
+    });
+
+    legend.innerHTML = "";
+    alloc.forEach(([cat, amount], i) => {
+      const pct = total ? (amount/total*100) : 0;
+      const row = document.createElement("div");
+      row.className = "allocation-legend-row";
+      row.innerHTML = `
+        <span class="allocation-swatch" style="background:${colors[i]}"></span>
+        <span class="name">${escapeHtml(cat)}</span>
+        <span class="amount">${fmtMoney(amount)} · ${pct.toFixed(1)}%</span>
+      `;
+      legend.appendChild(row);
+    });
+  }
+
+  // --- Form handlers ---
+
+  document.getElementById("add-account-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const name = document.getElementById("acc-name").value.trim();
+    const type = document.getElementById("acc-type").value;
+    const balance = parseFloat(document.getElementById("acc-balance").value);
+    const category = document.getElementById("acc-category").value.trim() || "Other";
+    if(!name || isNaN(balance)) return;
+    if(data.accounts[name]){
+      alert(`Account "${name}" already exists.`);
+      return;
+    }
+    data.accounts[name] = {type, balance, category};
+    saveData(data);
+    e.target.reset();
+    render();
+  });
+
+  document.getElementById("update-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const name = document.getElementById("upd-account").value;
+    const balance = parseFloat(document.getElementById("upd-balance").value);
+    if(!name || isNaN(balance)) return;
+    data.accounts[name].balance = balance;
+    saveData(data);
+    document.getElementById("upd-balance").value = "";
+    render();
+  });
+
+  document.getElementById("snapshot-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const dateVal = document.getElementById("snap-date").value;
+    if(!dateVal) return;
+    const balances = {};
+    for(const name in data.accounts) balances[name] = data.accounts[name].balance;
+    data.history = data.history.filter(h => h.date !== dateVal);
+    data.history.push({date: dateVal, balances});
+    data.history.sort((a,b) => a.date.localeCompare(b.date));
+    saveData(data);
+    render();
+  });
+
+  document.getElementById("goal-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const amount = parseFloat(document.getElementById("goal-amount").value);
+    if(isNaN(amount) || amount <= 0) return;
+    data.goal = amount;
+    saveData(data);
+    e.target.reset();
+    render();
+  });
+
+  document.getElementById("clear-goal-btn").addEventListener("click", () => {
+    data.goal = null;
+    saveData(data);
+    render();
+  });
+
+  document.getElementById("export-btn").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "net_worth_data.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById("import-btn").addEventListener("click", () => {
+    document.getElementById("import-file").click();
+  });
+
+  document.getElementById("import-file").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{
+        const parsed = JSON.parse(reader.result);
+        data = {accounts: parsed.accounts || {}, history: parsed.history || [], goal: (typeof parsed.goal === "number" ? parsed.goal : null)};
+        saveData(data);
+        render();
+      }catch(err){
+        alert("That file doesn't look like valid net worth tracker JSON.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
+  // Default snapshot date to today
+  document.getElementById("snap-date").value = new Date().toISOString().slice(0,10);
+
+  // --- Theme toggle ---
+
+  const SUN_PATH = `<circle cx="12" cy="12" r="4"></circle>
+    <path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"></path>`;
+  const MOON_PATH = `<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"></path>`;
+
+  function paintThemeIcon(theme){
+    const icon = document.getElementById("theme-icon");
+    // Icon shows the mode you'd switch TO.
+    icon.innerHTML = theme === "light" ? MOON_PATH : SUN_PATH;
+  }
+
+  function currentTheme(){
+    return document.documentElement.getAttribute("data-theme") || "dark";
+  }
+
+  function setTheme(theme){
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("netWorthTrackerTheme", theme);
+    paintThemeIcon(theme);
+    renderChart(); // rebuild so Chart.js picks up new CSS variable colors
+    renderAllocationChart();
+  }
+
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    setTheme(currentTheme() === "light" ? "dark" : "light");
+  });
+
+  paintThemeIcon(currentTheme());
+
+  render();
+})();
+</script>
+</body>
+</html>
