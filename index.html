@@ -211,9 +211,16 @@
     font-family:'IBM Plex Sans', sans-serif; font-size:13px; font-weight:500;
     background:var(--surface); color:var(--text); border:1px solid var(--border);
     border-left:3px solid var(--emerald); border-radius:8px; padding:10px 14px;
-    box-shadow: var(--shadow-md); animation: toastIn .25s ease both; max-width:320px;
+    box-shadow: var(--shadow-md); animation: toastIn .25s ease both; max-width:340px;
+    display:flex; align-items:center; gap:14px; justify-content:space-between;
   }
   .toast.error{border-left-color:var(--brick);}
+  .toast-action{
+    background:transparent; border:none; color:var(--emerald); font-weight:600;
+    font-size:11px; text-transform:uppercase; letter-spacing:0.05em; cursor:pointer;
+    padding:2px 4px; flex-shrink:0; font-family:'IBM Plex Sans', sans-serif;
+  }
+  .toast-action:hover{ text-decoration:underline; transform:none; border-color:transparent; }
 
   @keyframes goalGlow{
     0%{ box-shadow: var(--shadow-sm), var(--shadow-md), 0 0 0 0 rgba(217,166,63,0); }
@@ -248,6 +255,14 @@
   .goal-projection.reached{color:var(--emerald);}
   .goal-header-row{display:flex; justify-content:space-between; align-items:center;}
   .goal-header-row button{padding:4px 10px; font-size:11px;}
+
+  .chart-toggle{display:flex; gap:6px;}
+  .chart-toggle-btn{
+    padding:5px 12px; font-size:12px; border-radius:999px;
+    background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim);
+  }
+  .chart-toggle-btn:hover{transform:none;}
+  .chart-toggle-btn.active{background:var(--emerald); border-color:var(--emerald); color:#0d1512; font-weight:600;}
 
   .category-badge{
     font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-dim);
@@ -391,7 +406,13 @@
       </div>
 
       <div class="card">
-        <h2>Net worth over time</h2>
+        <div class="goal-header-row">
+          <h2 style="margin:0;">Net worth over time</h2>
+          <div class="chart-toggle" id="chart-toggle">
+            <button type="button" class="chart-toggle-btn active" data-view="total">Total</button>
+            <button type="button" class="chart-toggle-btn" data-view="accounts">By account</button>
+          </div>
+        </div>
         <canvas id="history-chart" height="90"></canvas>
         <div class="empty" id="chart-empty" style="display:none;">
           <svg viewBox="0 0 24 24"><path d="M3 17l5-5 4 4 8-9M3 21h18"/></svg>
@@ -476,18 +497,34 @@
     return sign + "$" + Math.abs(x).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
   }
 
-  function showToast(message, type){
+  function showToast(message, type, action){
     const container = document.getElementById("toast-container");
     const el = document.createElement("div");
     el.className = "toast" + (type === "error" ? " error" : "");
-    el.textContent = message;
-    container.appendChild(el);
-    setTimeout(() => {
+
+    const span = document.createElement("span");
+    span.textContent = message;
+    el.appendChild(span);
+
+    let dismissTimer;
+    function dismiss(){
+      clearTimeout(dismissTimer);
       el.style.transition = "opacity .25s ease, transform .25s ease";
       el.style.opacity = "0";
       el.style.transform = "translateY(6px)";
       setTimeout(() => el.remove(), 250);
-    }, 3200);
+    }
+
+    if(action){
+      const btn = document.createElement("button");
+      btn.className = "toast-action";
+      btn.textContent = action.label;
+      btn.addEventListener("click", () => { action.onClick(); dismiss(); });
+      el.appendChild(btn);
+    }
+
+    container.appendChild(el);
+    dismissTimer = setTimeout(dismiss, action ? 6000 : 3200);
   }
 
   const CATEGORY_COLORS = ["#4fa98c", "#d9a63f", "#7aa6c2", "#c1665a", "#9a7fb5", "#e0955c", "#5b8fa8", "#b5c98f"];
@@ -633,9 +670,18 @@
     body.querySelectorAll("[data-remove]").forEach(btn => {
       btn.addEventListener("click", () => {
         const name = btn.getAttribute("data-remove");
+        const removed = data.accounts[name];
         delete data.accounts[name];
         saveData(data);
         render();
+        showToast(`Removed ${name}.`, null, {
+          label: "Undo",
+          onClick: () => {
+            data.accounts[name] = removed;
+            saveData(data);
+            render();
+          }
+        });
       });
     });
   }
@@ -681,12 +727,24 @@
     body.querySelectorAll("[data-remove-snap]").forEach(btn => {
       btn.addEventListener("click", () => {
         const idx = parseInt(btn.getAttribute("data-remove-snap"), 10);
+        const removed = data.history[idx];
         data.history.splice(idx, 1);
         saveData(data);
         render();
+        showToast(`Removed snapshot for ${removed.date}.`, null, {
+          label: "Undo",
+          onClick: () => {
+            data.history.push(removed);
+            data.history.sort((a,b) => a.date.localeCompare(b.date));
+            saveData(data);
+            render();
+          }
+        });
       });
     });
   }
+
+  let chartView = "total";
 
   function renderChart(){
     const canvas = document.getElementById("history-chart");
@@ -702,7 +760,6 @@
 
     const sorted = [...data.history].sort((a,b) => a.date.localeCompare(b.date));
     const labels = sorted.map(h => h.date);
-    const values = sorted.map(h => computeNetWorth(h.balances, data.accounts));
 
     const ctx = canvas.getContext("2d");
     const rootStyles = getComputedStyle(document.documentElement);
@@ -711,27 +768,59 @@
     const textDim = rootStyles.getPropertyValue("--text-dim").trim();
     const border = rootStyles.getPropertyValue("--border").trim();
 
+    let datasets, showLegend;
+
+    if(chartView === "accounts" && Object.keys(data.accounts).length){
+      showLegend = true;
+      datasets = Object.keys(data.accounts).map(name => {
+        const acc = data.accounts[name];
+        const color = categoryColor(acc.category || "Other");
+        const values = sorted.map(h => (name in h.balances ? h.balances[name] : null));
+        return {
+          label: name + (acc.type === "liability" ? " (liability)" : ""),
+          data: values,
+          borderColor: color,
+          backgroundColor: "transparent",
+          borderDash: acc.type === "liability" ? [4, 3] : [],
+          pointRadius: 3,
+          pointBackgroundColor: color,
+          borderWidth: 2,
+          tension: 0.25,
+          spanGaps: true
+        };
+      });
+    } else {
+      showLegend = false;
+      const values = sorted.map(h => computeNetWorth(h.balances, data.accounts));
+      datasets = [{
+        label: "Net worth",
+        data: values,
+        borderColor: emerald,
+        backgroundColor: "rgba(79,169,140,0.12)",
+        pointBackgroundColor: gold,
+        pointBorderColor: gold,
+        pointRadius: 4,
+        borderWidth: 2,
+        fill: true,
+        tension: 0.25
+      }];
+    }
+
     if(chart) chart.destroy();
     chart = new Chart(ctx, {
       type: "line",
-      data: {
-        labels,
-        datasets: [{
-          label: "Net worth",
-          data: values,
-          borderColor: emerald,
-          backgroundColor: "rgba(79,169,140,0.12)",
-          pointBackgroundColor: gold,
-          pointBorderColor: gold,
-          pointRadius: 4,
-          borderWidth: 2,
-          fill: true,
-          tension: 0.25
-        }]
-      },
+      data: { labels, datasets },
       options: {
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: {
+            display: showLegend,
+            labels: { color: textDim, font: {family: "IBM Plex Mono", size: 11}, boxWidth: 10, usePointStyle: true }
+          },
+          tooltip: {
+            callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtMoney(ctx.parsed.y)}` }
+          }
+        },
         scales: {
           x: { ticks: { color: textDim, font: {family: "IBM Plex Mono", size: 11} }, grid: { color: border } },
           y: {
@@ -945,10 +1034,7 @@
     showToast(`Updated ${name}.`);
   });
 
-  document.getElementById("snapshot-form").addEventListener("submit", e => {
-    e.preventDefault();
-    const dateVal = document.getElementById("snap-date").value;
-    if(!dateVal) return;
+  function recordSnapshot(dateVal){
     const balances = {};
     for(const name in data.accounts) balances[name] = data.accounts[name].balance;
     data.history = data.history.filter(h => h.date !== dateVal);
@@ -957,6 +1043,21 @@
     saveData(data);
     render();
     showToast(`Snapshot recorded for ${dateVal}.`);
+  }
+
+  document.getElementById("snapshot-form").addEventListener("submit", e => {
+    e.preventDefault();
+    const dateVal = document.getElementById("snap-date").value;
+    if(!dateVal) return;
+    const existing = data.history.some(h => h.date === dateVal);
+    if(existing){
+      showToast(`A snapshot for ${dateVal} already exists.`, "error", {
+        label: "Overwrite",
+        onClick: () => recordSnapshot(dateVal)
+      });
+      return;
+    }
+    recordSnapshot(dateVal);
   });
 
   document.getElementById("goal-form").addEventListener("submit", e => {
@@ -1013,6 +1114,15 @@
 
   // Default snapshot date to today
   document.getElementById("snap-date").value = new Date().toISOString().slice(0,10);
+
+  document.querySelectorAll(".chart-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".chart-toggle-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      chartView = btn.dataset.view;
+      renderChart();
+    });
+  });
 
   // --- Theme toggle ---
 
