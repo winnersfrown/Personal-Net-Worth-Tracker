@@ -490,11 +490,17 @@
     }, 3200);
   }
 
-  const CATEGORY_COLORS = ["#4fa98c", "#d9a63f", "#7aa6c2", "#c1665a", "#9a7fb5", "#5b6567", "#b5c98f"];
+  const CATEGORY_COLORS = ["#4fa98c", "#d9a63f", "#7aa6c2", "#c1665a", "#9a7fb5", "#e0955c", "#5b8fa8", "#b5c98f"];
+  let categoryColorMap = {};
+  function buildCategoryColorMap(){
+    const cats = new Set();
+    for(const name in data.accounts) cats.add(data.accounts[name].category || "Other");
+    const sorted = [...cats].sort();
+    categoryColorMap = {};
+    sorted.forEach((cat, i) => { categoryColorMap[cat] = CATEGORY_COLORS[i % CATEGORY_COLORS.length]; });
+  }
   function categoryColor(cat){
-    let hash = 0;
-    for(let i = 0; i < cat.length; i++) hash = (hash * 31 + cat.charCodeAt(i)) >>> 0;
-    return CATEGORY_COLORS[hash % CATEGORY_COLORS.length];
+    return categoryColorMap[cat] || CATEGORY_COLORS[0];
   }
 
   function computeNetWorth(balances, accounts){
@@ -525,6 +531,7 @@
   }
 
   function render(){
+    buildCategoryColorMap();
     renderAccountsTable();
     renderUpdateSelect();
     renderHistoryTable();
