@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Net Worth Tracker</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#12181a" id="theme-color-meta">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Net Worth">
+
 <script>
   // Applied before CSS paints to avoid a flash of the wrong theme.
   (function(){
@@ -78,7 +88,8 @@
     font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.14em;
     text-transform:uppercase; color:var(--emerald);
   }
-  .io-buttons{display:flex; gap:8px;}
+  .io-buttons{display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;}
+  .io-divider{width:1px; align-self:stretch; background:var(--border); margin:2px 0;}
   button, .btn{
     font-family:'IBM Plex Sans', sans-serif; font-size:13px; font-weight:500;
     background:var(--surface-2); color:var(--text); border:1px solid var(--border);
@@ -299,9 +310,15 @@
       <button id="theme-toggle" title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
         <svg id="theme-icon" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"></svg>
       </button>
+      <button id="install-btn" title="Install this app" style="display:none;">Install app</button>
+      <div class="io-divider"></div>
       <button id="export-btn" title="Download your data as JSON">Export JSON</button>
       <button id="import-btn" title="Load a JSON file">Import JSON</button>
       <input type="file" id="import-file" accept="application/json">
+      <div class="io-divider"></div>
+      <button id="export-csv-btn" title="Download your data as CSV">Export CSV</button>
+      <button id="import-csv-btn" title="Load a CSV file">Import CSV</button>
+      <input type="file" id="import-csv-file" accept=".csv,text/csv">
     </div>
   </header>
 
@@ -1112,6 +1129,144 @@
     e.target.value = "";
   });
 
+  // --- CSV export/import ---
+  // Format: one row per snapshot, one column per account. Column headers encode
+  // each account's type and category as "Name (type/category)" so a round trip
+  // through Import CSV recovers the full schema, not just raw numbers.
+
+  function csvField(value){
+    const s = String(value);
+    if(/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  function parseCSV(text){
+    const rows = [];
+    let row = [], field = "", inQuotes = false;
+    for(let i = 0; i < text.length; i++){
+      const c = text[i];
+      if(inQuotes){
+        if(c === '"'){
+          if(text[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; }
+        } else field += c;
+      } else if(c === '"'){
+        inQuotes = true;
+      } else if(c === ','){
+        row.push(field); field = "";
+      } else if(c === "\n"){
+        row.push(field); rows.push(row); row = []; field = "";
+      } else if(c === "\r"){
+        // skip, \n handles the line break
+      } else {
+        field += c;
+      }
+    }
+    if(field.length || row.length){ row.push(field); rows.push(row); }
+    return rows.filter(r => !(r.length === 1 && r[0].trim() === ""));
+  }
+
+  document.getElementById("export-csv-btn").addEventListener("click", () => {
+    const accountNames = Object.keys(data.accounts);
+    const header = ["Date", ...accountNames.map(n => {
+      const acc = data.accounts[n];
+      return `${n} (${acc.type}/${acc.category || "Other"})`;
+    }), "Net Worth"];
+
+    const sorted = [...data.history].sort((a,b) => a.date.localeCompare(b.date));
+    const lines = [header.map(csvField).join(",")];
+
+    if(sorted.length){
+      sorted.forEach(h => {
+        const row = [h.date];
+        accountNames.forEach(n => row.push(n in h.balances ? h.balances[n] : ""));
+        row.push(computeNetWorth(h.balances, data.accounts));
+        lines.push(row.map(csvField).join(","));
+      });
+    } else if(accountNames.length){
+      // No snapshots yet — still export current live balances as one row.
+      const row = ["Current"];
+      accountNames.forEach(n => row.push(data.accounts[n].balance));
+      row.push(currentNetWorth());
+      lines.push(row.map(csvField).join(","));
+    }
+
+    const blob = new Blob([lines.join("\r\n")], {type: "text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "net_worth_history.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Downloaded net_worth_history.csv.");
+  });
+
+  document.getElementById("import-csv-btn").addEventListener("click", () => {
+    document.getElementById("import-csv-file").click();
+  });
+
+  document.getElementById("import-csv-file").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{
+        const rows = parseCSV(reader.result);
+        if(rows.length < 2) throw new Error("CSV has no data rows");
+
+        const header = rows[0];
+        const lastIsNetWorth = header[header.length - 1].trim().toLowerCase() === "net worth";
+        const accEnd = lastIsNetWorth ? header.length - 1 : header.length;
+
+        const accountDefs = [];
+        for(let i = 1; i < accEnd; i++){
+          const raw = header[i] || "";
+          const m = raw.match(/^(.*)\s\(([^/()]+)\/([^()]+)\)\s*$/);
+          if(m){
+            accountDefs.push({col: i, name: m[1].trim(), type: m[2].trim().toLowerCase() === "liability" ? "liability" : "asset", category: m[3].trim()});
+          } else if(raw.trim()){
+            accountDefs.push({col: i, name: raw.trim(), type: "asset", category: "Other"});
+          }
+        }
+        if(!accountDefs.length) throw new Error("No account columns found");
+
+        const newAccounts = {};
+        const newHistory = [];
+
+        for(let r = 1; r < rows.length; r++){
+          const row = rows[r];
+          if(!row[0] || !row[0].trim()) continue;
+          const dateVal = row[0].trim();
+          const balances = {};
+
+          accountDefs.forEach(def => {
+            const raw = row[def.col];
+            if(raw === undefined || raw === "") return;
+            const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ""));
+            if(isNaN(num)) return;
+            balances[def.name] = num;
+            newAccounts[def.name] = {type: def.type, balance: num, category: def.category};
+          });
+
+          if(/^\d{4}-\d{2}-\d{2}$/.test(dateVal)){
+            newHistory.push({date: dateVal, balances});
+          }
+          // Rows like "Current" (our own no-history export fallback) update
+          // newAccounts above but aren't recorded as a dated snapshot.
+        }
+
+        newHistory.sort((a,b) => a.date.localeCompare(b.date));
+        data = {accounts: newAccounts, history: newHistory, goal: data.goal};
+        saveData(data);
+        render();
+        showToast("CSV imported successfully.");
+      }catch(err){
+        showToast("That file doesn't look like a net worth tracker CSV export.", "error");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  });
+
   // Default snapshot date to today
   document.getElementById("snap-date").value = new Date().toISOString().slice(0,10);
 
@@ -1144,6 +1299,7 @@
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("netWorthTrackerTheme", theme);
     paintThemeIcon(theme);
+    document.getElementById("theme-color-meta").setAttribute("content", theme === "light" ? "#f1efea" : "#12181a");
     renderChart(); // rebuild so Chart.js picks up new CSS variable colors
     renderAllocationChart();
   }
@@ -1153,6 +1309,38 @@
   });
 
   paintThemeIcon(currentTheme());
+  document.getElementById("theme-color-meta").setAttribute("content", currentTheme() === "light" ? "#f1efea" : "#12181a");
+
+  // --- PWA: service worker + install prompt ---
+  // Service workers require http(s), so this is a no-op when the file is
+  // opened directly (file://) rather than served, e.g. via GitHub Pages.
+  if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {
+        // Offline support just won't be available; the app still works online.
+      });
+    });
+  }
+
+  let deferredInstallPrompt = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    document.getElementById("install-btn").style.display = "inline-flex";
+  });
+
+  document.getElementById("install-btn").addEventListener("click", async () => {
+    if(!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    document.getElementById("install-btn").style.display = "none";
+  });
+
+  window.addEventListener("appinstalled", () => {
+    document.getElementById("install-btn").style.display = "none";
+    showToast("App installed.");
+  });
 
   render();
 })();
