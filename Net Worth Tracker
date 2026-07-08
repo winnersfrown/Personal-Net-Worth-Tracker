@@ -45,6 +45,7 @@ Run `python net_worth_tracker.py -h` for full help.
 """
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -230,6 +231,11 @@ def cmd_snapshot(args, data, path):
     snap_date = args.date or date.today().isoformat()
     balances = {name: info["balance"] for name, info in data["accounts"].items()}
 
+    already_exists = any(h["date"] == snap_date for h in data["history"])
+    if already_exists and not args.force:
+        print(f"A snapshot for {snap_date} already exists. Re-run with --force to overwrite it.")
+        sys.exit(1)
+
     # Replace an existing snapshot for the same date, if present.
     data["history"] = [h for h in data["history"] if h["date"] != snap_date]
     data["history"].append({"date": snap_date, "balances": balances})
@@ -237,7 +243,8 @@ def cmd_snapshot(args, data, path):
 
     save_data(path, data)
     net_worth = compute_net_worth(balances, data["accounts"])
-    print(f"Snapshot recorded for {snap_date}. Net worth: {fmt_money(net_worth)}")
+    verb = "replaced" if already_exists else "recorded"
+    print(f"Snapshot {verb} for {snap_date}. Net worth: {fmt_money(net_worth)}")
 
 
 def cmd_set_goal(args, data, path):
@@ -397,6 +404,97 @@ def cmd_chart(args, data, path):
     print(f"Chart saved to '{out_path}'.")
 
 
+def cmd_export_csv(args, data, path):
+    """Writes one row per snapshot, one column per account. Column headers encode
+    each account's type and category as 'Name (type/category)' so 'import-csv'
+    can recover the full schema, not just raw numbers. Compatible with the
+    web UI's Export/Import CSV feature."""
+    accounts = data["accounts"]
+    account_names = list(accounts.keys())
+    header = ["Date"] + [
+        f"{name} ({accounts[name]['type']}/{accounts[name].get('category', 'Other')})"
+        for name in account_names
+    ] + ["Net Worth"]
+
+    history = sorted(data["history"], key=lambda h: h["date"])
+    out_path = args.output or "net_worth_history.csv"
+
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        if history:
+            for h in history:
+                row = [h["date"]] + [h["balances"].get(name, "") for name in account_names]
+                row.append(compute_net_worth(h["balances"], accounts))
+                writer.writerow(row)
+        elif account_names:
+            row = ["Current"] + [accounts[name]["balance"] for name in account_names]
+            row.append(compute_net_worth({n: accounts[n]["balance"] for n in account_names}, accounts))
+            writer.writerow(row)
+
+    print(f"CSV exported to '{out_path}'.")
+
+
+def cmd_import_csv(args, data, path):
+    import re
+
+    with open(args.file_path, "r", newline="") as f:
+        rows = list(csv.reader(f))
+
+    if len(rows) < 2:
+        print("That CSV has no data rows.")
+        sys.exit(1)
+
+    header = rows[0]
+    last_is_net_worth = header[-1].strip().lower() == "net worth"
+    acc_end = len(header) - 1 if last_is_net_worth else len(header)
+
+    account_defs = []  # (col_index, name, type, category)
+    for i in range(1, acc_end):
+        raw = header[i]
+        m = re.match(r"^(.*)\s\(([^/()]+)/([^()]+)\)\s*$", raw)
+        if m:
+            name, acc_type, category = m.group(1).strip(), m.group(2).strip().lower(), m.group(3).strip()
+            acc_type = "liability" if acc_type == "liability" else "asset"
+        else:
+            name, acc_type, category = raw.strip(), "asset", "Other"
+        if name:
+            account_defs.append((i, name, acc_type, category))
+
+    if not account_defs:
+        print("No account columns found in that CSV.")
+        sys.exit(1)
+
+    new_accounts = {}
+    new_history = []
+
+    for row in rows[1:]:
+        if not row or not row[0].strip():
+            continue
+        date_val = row[0].strip()
+        balances = {}
+        for col, name, acc_type, category in account_defs:
+            if col >= len(row) or row[col] == "":
+                continue
+            cleaned = re.sub(r"[^0-9.\-]", "", row[col])
+            if not cleaned:
+                continue
+            try:
+                num = float(cleaned)
+            except ValueError:
+                continue
+            balances[name] = num
+            new_accounts[name] = {"type": acc_type, "balance": num, "category": category}
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", date_val):
+            new_history.append({"date": date_val, "balances": balances})
+
+    new_history.sort(key=lambda h: h["date"])
+    data["accounts"] = new_accounts
+    data["history"] = new_history
+    save_data(path, data)
+    print(f"Imported {len(new_accounts)} account(s) and {len(new_history)} snapshot(s) from '{args.file_path}'.")
+
+
 # --------------------------------------------------------------------------
 # Argument parsing
 # --------------------------------------------------------------------------
@@ -436,6 +534,7 @@ def build_parser():
 
     p = sub.add_parser("snapshot", help="Record a dated net worth snapshot from current balances")
     p.add_argument("--date", help="Date for the snapshot, YYYY-MM-DD (default: today)")
+    p.add_argument("--force", action="store_true", help="Overwrite an existing snapshot for that date without asking")
     p.set_defaults(func=cmd_snapshot)
 
     p = sub.add_parser("report", help="Show current net worth broken down by account")
@@ -459,6 +558,14 @@ def build_parser():
     )
     p.add_argument("--output", help="Output PNG path (default depends on --type)")
     p.set_defaults(func=cmd_chart)
+
+    p = sub.add_parser("export-csv", help="Export snapshot history to CSV (one row per snapshot)")
+    p.add_argument("--output", help="Output CSV path (default: net_worth_history.csv)")
+    p.set_defaults(func=cmd_export_csv)
+
+    p = sub.add_parser("import-csv", help="Import accounts and history from a CSV file (replaces current data)")
+    p.add_argument("file_path", help="Path to the CSV file to import")
+    p.set_defaults(func=cmd_import_csv)
 
     return parser
 
