@@ -1316,8 +1316,10 @@
   // opened directly (file://) rather than served, e.g. via GitHub Pages.
   if("serviceWorker" in navigator && location.protocol.startsWith("http")){
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => {
+      const swUrl = new URL("sw.js", document.baseURI).href;
+      navigator.serviceWorker.register(swUrl).catch(err => {
         // Offline support just won't be available; the app still works online.
+        console.error("Service worker registration failed:", err);
       });
     });
   }
